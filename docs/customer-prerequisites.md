@@ -12,7 +12,7 @@ Missing items are the most common cause of delay on day-of deployment.
       deployment identity's resource-group-scoped roles. The infrastructure pipeline uses
       resource-group deployments; it does **not** create the resource group.
 - [ ] Confirmation the subscription has the following **resource providers registered**:
-      `Microsoft.Synapse`, `Microsoft.Storage`, `Microsoft.KeyVault`, `Microsoft.OperationalInsights`,
+      `Microsoft.Synapse`, `Microsoft.Sql`, `Microsoft.Storage`, `Microsoft.KeyVault`, `Microsoft.OperationalInsights`,
       `Microsoft.Insights`, `Microsoft.ManagedIdentity`, `Microsoft.Compute`, `Microsoft.Network`.
 - [ ] Naming convention / prefix the customer wants reflected in resource names (used to populate
       `infra/parameters/<env>.bicepparam`).
@@ -157,6 +157,7 @@ Grant resource-specific and data-plane permissions at the narrower scopes listed
 | User Access Administrator (or a custom role permitting the required role assignments) | Target resource group | Required by the current infrastructure template to grant the Synapse managed identity storage access; Contributor alone cannot create role assignments |
 | Key Vault Secrets Officer / Administrator | Target Key Vault | Seed secrets consumed by linked services |
 | Synapse Artifact Publisher | Target Synapse workspace | Publish linked services, datasets, pipelines, and SQL scripts through the artifact pipeline |
+| Synapse Credential User | Workspace `WorkspaceSystemIdentity` credential | Run the managed-identity-backed sample pipeline during live smoke tests; Artifact Publisher alone cannot run pipelines |
 | Storage Blob Data Contributor | PoC storage account | Seed the versioned raw sample CSV during artifact publication |
 
 - [ ] Confirm who on the customer side can **grant** these role assignments (an Owner or User
@@ -169,12 +170,16 @@ Grant resource-specific and data-plane permissions at the narrower scopes listed
       authorized administrator grant the publishing identity its Synapse workspace role and
       **Storage Blob Data Contributor** on the deployed storage account. The template grants
       storage access to the **workspace managed identity**, not to the pipeline identity.
+- [ ] For live pipeline execution, also grant the publishing identity **Synapse Credential User**
+      at `workspaces/<workspace>/credentials/WorkspaceSystemIdentity`.
 
 ## 4. Network and firewall
 
 Both platforms' deployment/publication jobs require a private Windows runner/agent. GitHub uses
 the runner procedure below; ADO uses the same topology in a separate resource group via the
 [ADO bootstrap procedure](deployment-runbook.md#bootstrap-identity-settings-and-registration).
+When storage public access is disabled, verify sample output from the private runner rather
+than enabling public storage access for workstation checks.
 Before the first infrastructure promotion:
 
 - Have an administrator create a dedicated shared resource group in West US 3.

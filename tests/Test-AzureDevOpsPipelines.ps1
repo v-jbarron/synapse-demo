@@ -56,8 +56,11 @@ try {
     Assert-Ado ($publish.Contains('timeoutInMinutes: 60')) 'Publication timeout is missing.'
     foreach ($name in @('deploy.yml', 'publish-artifacts.yml')) {
         $text = Get-Content (Join-Path $root "azure-pipelines\$name") -Raw
+        Assert-Ado ($text -match '(?s)name: deploymentTarget.*?default: dev') "$name does not default to dev-only deployment."
+        Assert-Ado ($text.Contains("if ne(parameters.deploymentTarget, 'dev')")) "$name does not gate test promotion."
+        Assert-Ado ($text.Contains("if eq(parameters.deploymentTarget, 'prod')")) "$name does not gate prod promotion."
         Assert-Ado (($text | Select-String -Pattern "packageVersion:.*stageDependencies.Package.Package.outputs" -AllMatches).Matches.Count -eq 3) "$name does not wire the package version to all environments."
-        Assert-Ado (($text | Select-String -Pattern '        - Package' -AllMatches).Matches.Count -eq 3) "$name does not expose Package outputs to all stages."
+        Assert-Ado (($text | Select-String -Pattern '(?m)^\s+- Package\s*$' -AllMatches).Matches.Count -eq 3) "$name does not expose Package outputs to all stages."
         Assert-Ado ($text.Contains('scripts/Expand-SynapsePipelinePackage.ps1')) "$name does not trigger on package helper changes."
         Assert-Ado ($text.Contains('scripts/Test-RunnerPrivateConnectivity.ps1')) "$name does not trigger on preflight changes."
         Assert-Ado ($text -notmatch 'serviceConnection: \$\(') "$name resolves service connections too late."
@@ -173,9 +176,9 @@ try {
     $registerParameters.PoolId = 8
     Assert-AdoFailure { & $register @registerParameters } 'different organization, pool or name'
     $registerParameters.PoolId = 7
-    Remove-Item -LiteralPath (Join-Path $agentDirectory '.service')
+    Remove-Item -LiteralPath (Join-Path $agentDirectory '.service') -Force
     Assert-AdoFailure { & $register @registerParameters } 'no Windows service'
-    Remove-Item -LiteralPath (Join-Path $agentDirectory '.agent')
+    Remove-Item -LiteralPath (Join-Path $agentDirectory '.agent') -Force
     Assert-AdoFailure { & $register @registerParameters } 'installation is missing'
     $registerParameters.RegistrationToken = ' '
     Assert-AdoFailure { & $register @registerParameters } 'credential is empty'

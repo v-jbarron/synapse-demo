@@ -309,6 +309,29 @@ quota, then start a new run on the updated `main` commit. Quota and SKU access a
 checks; increasing quota does not necessarily remove `NotAvailableForSubscription`.
 The bootstrap deliberately does not silently switch sizes or regions.
 
+### Runner OS disk migration
+
+Both GitHub and Azure DevOps bootstrap require the shared runner's managed OS disk to
+use `StandardSSD_LRS`, matching the shared template. Before what-if or deployment,
+bootstrap reads the existing managed disk's actual SKU. A mismatch or failed disk lookup
+stops bootstrap without attempting deployment. It does not silently accept drift, stop
+the VM, or convert the disk. What-if alone does not guarantee that Azure supports every
+proposed update.
+
+If an existing runner has a different disk SKU (for example `Standard_LRS`), schedule
+approved downtime and stop jobs using the runner. Confirm the subscription, VM, and OS disk
+ID reported by the preflight, and take any required backup. In Azure portal:
+
+1. Open the runner VM and select **Stop**; wait until it is **Stopped (deallocated)**.
+2. Open **Disks**, select its **OS disk**, and use **Size + performance** to change the
+   storage type to **Standard SSD LRS** (`StandardSSD_LRS`), then save.
+3. Start the VM, verify the disk SKU and agent health, and rerun bootstrap on the updated
+   commit. A matching existing disk passes preflight on subsequent runs.
+
+Do not delete/recreate the runner or grant more permissions to resolve a SKU mismatch.
+Azure rejects changing an existing managed disk's storage type through the VM resource;
+the conversion must target the managed disk itself.
+
 Prerequisites are installed by [Initialize-GitHubRunner.ps1](../scripts/Initialize-GitHubRunner.ps1).
 PowerShell/Git/runner downloads use official release metadata and SHA256 asset digests; the
 Azure CLI installer requires a valid Microsoft Authenticode signature. A missing digest or
@@ -486,6 +509,7 @@ az account show --query '{subscription:name, subscriptionId:id, tenantId:tenantI
 
 $requiredProviders = @(
     'Microsoft.Synapse',
+    'Microsoft.Sql',
     'Microsoft.Storage',
     'Microsoft.KeyVault',
     'Microsoft.OperationalInsights',
@@ -701,9 +725,18 @@ longer required.
 
 ### Register and protect the pipelines
 
+The infrastructure and artifact promotion pipelines default to `deploymentTarget: dev`.
+Choose `test` to promote through dev and test, or `prod` to promote through all three
+environments. Configure every selected environment before running; unselected stages are
+excluded during template expansion. Automatic CI runs deploy only dev.
+
 1. Connect the existing **GitHub repository** to the ADO project using its GitHub integration.
    Authorize repository checkout and restrict repository/service-connection/pool use to the
    intended pipelines. Source does not move to Azure Repos; existing GitHub Actions stay intact.
+   For an isolated Azure Repos deployment copy, explicitly copy the solution into the target
+   project and register the same YAML entry points against that repository's `main` branch.
+   This copy is independent of GitHub; updates must be synchronized deliberately. Azure Repos
+   PR validation uses branch-policy build validation rather than YAML `pr` triggers.
 2. Register these YAML entry points as separate pipelines:
    - `azure-pipelines/validate.yml` (hosted PR/main offline checks);
    - `azure-pipelines/deploy-runner.yml` (manual bootstrap/repair);

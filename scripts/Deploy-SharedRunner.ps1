@@ -49,9 +49,25 @@ $json = az vm list --resource-group $ResourceGroupName --output json
 if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect existing shared VMs.' }
 $existing = @($json | ConvertFrom-Json | Where-Object {
     $_.tags -and $_.tags.PSObject.Properties['workload'] -and
-    $_.tags.workload -eq 'synapse-shared-runner' -and $_.hardwareProfile.vmSize -eq $VmSize
+    $_.tags.workload -eq 'synapse-shared-runner'
 })
-$additionalCores = if ($existing.Count -eq 1) { 0 } else { $cores }
+if ($existing.Count -gt 1) { throw "Multiple shared runner VMs found in '$ResourceGroupName'; resolve the ambiguity before deployment." }
+if ($existing.Count -eq 1) {
+    $vm = $existing[0]
+    $diskId = $vm.storageProfile.osDisk.managedDisk.id
+    if ([string]::IsNullOrWhiteSpace($diskId)) { throw "Runner VM '$($vm.name)' has no managed OS disk ID." }
+    $json = az disk show --ids $diskId --output json
+    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect runner OS disk '$diskId'; deployment has not been started." }
+    $disk = $json | ConvertFrom-Json
+    if ($null -eq $disk -or -not $disk.PSObject.Properties['sku'] -or $null -eq $disk.sku -or
+        -not $disk.sku.PSObject.Properties['name'] -or [string]::IsNullOrWhiteSpace($disk.sku.name)) {
+        throw "Runner OS disk '$diskId' returned no SKU; deployment has not been started."
+    }
+    if ($disk.sku.name -ne 'StandardSSD_LRS') {
+        throw "Runner VM '$($vm.name)' OS disk '$diskId' uses '$($disk.sku.name)', but the shared template requires 'StandardSSD_LRS'. Azure cannot change this through the VM deployment. During approved downtime, stop/deallocate the VM, convert the managed disk to StandardSSD_LRS, start the VM, and rerun bootstrap. See docs/deployment-runbook.md#runner-os-disk-migration. No deployment has been started."
+    }
+}
+$additionalCores = if ($existing.Count -eq 1 -and $existing[0].hardwareProfile.vmSize -eq $VmSize) { 0 } else { $cores }
 $json = az vm list-usage --location $Location --output json
 if ($LASTEXITCODE -ne 0) { throw 'Unable to check VM quota.' }
 $usage = @($json | ConvertFrom-Json)

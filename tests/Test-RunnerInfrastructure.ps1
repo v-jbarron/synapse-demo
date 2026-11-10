@@ -25,6 +25,7 @@ function Assert-RunnerFailure {
 $global:RunnerTestCalls = [Collections.Generic.List[object]]::new()
 $global:RunnerTestMode = 'success'
 $global:RunnerTestRestrictions = @()
+$global:RunnerTestDiskSku = 'StandardSSD_LRS'
 function global:az {
     $global:LASTEXITCODE = 0
     $arguments = @($args)
@@ -46,13 +47,24 @@ function global:az {
         }) -Depth 10
     }
     if ($text -match '^vm list-usage') {
+        if ($global:RunnerTestMode -eq 'new-vm') {
+            return '[{"name":{"value":"cores"},"limit":100,"currentValue":0},{"name":{"value":"standardBasv2Family"},"limit":100,"currentValue":0}]'
+        }
         return '[{"name":{"value":"cores"},"limit":100,"currentValue":100},{"name":{"value":"standardBasv2Family"},"limit":100,"currentValue":100}]'
     }
     if ($text -match '^vm list ') {
         if ($global:RunnerTestMode -eq 'existing-vm') {
-            return '[{"tags":{"workload":"synapse-shared-runner"},"hardwareProfile":{"vmSize":"Standard_B2as_v2"}}]'
+            return '[{"name":"runner","tags":{"workload":"synapse-shared-runner"},"hardwareProfile":{"vmSize":"Standard_B2as_v2"},"storageProfile":{"osDisk":{"managedDisk":{"id":"/subscriptions/test/resourceGroups/shared/providers/Microsoft.Compute/disks/runner-os"}}}}]'
         }
         return '[]'
+    }
+    if ($text -match '^disk show') {
+        if ($global:RunnerTestDiskSku -eq 'lookup-failed') {
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if ($global:RunnerTestDiskSku -eq 'missing-sku') { return '{}' }
+        return @{ sku = @{ name = $global:RunnerTestDiskSku } } | ConvertTo-Json
     }
     if ($global:RunnerTestMode -eq 'start-failure' -and 'put' -in $arguments) {
         $global:LASTEXITCODE = 1
@@ -108,6 +120,14 @@ try {
     $payloadPath = @($put.Arguments | Where-Object { $_ -like '@*' })[0].Substring(1)
     Assert-RunnerTest (-not (Test-Path -LiteralPath $payloadPath)) 'Sensitive payload was not cleaned up.'
     Assert-RunnerTest (@($global:RunnerTestCalls | Where-Object { 'delete' -in $_.Arguments }).Count -eq 1) 'Completed Run Command resource was not deleted.'
+    $get = @($global:RunnerTestCalls | Where-Object { 'get' -in $_.Arguments })[0]
+    $inspectionUri = $get.Arguments[[array]::IndexOf($get.Arguments, '--url') + 1]
+    Assert-RunnerTest ($inspectionUri.Trim('"').EndsWith('?api-version=2024-11-01&$expand=instanceView')) 'Run Command inspection lost its API version or instance-view query.'
+    if ($IsWindows) {
+        Assert-RunnerTest ($inspectionUri.StartsWith('"') -and $inspectionUri.EndsWith('"')) 'Windows az.cmd inspection URI is not protected from cmd.exe query splitting.'
+    } else {
+        Assert-RunnerTest (-not $inspectionUri.Contains('"')) 'Unix inspection URI contains literal shell quotes.'
+    }
     $global:RunnerTestMode = 'start-failure'
     Assert-RunnerFailure { & $commandScript @parameters } 'Unable to start'
     $global:RunnerTestMode = 'execution-failure'
@@ -231,6 +251,32 @@ try {
     Assert-RunnerTest ($sharedDeploy.Body.parameters.vmSize.value -eq 'Standard_B2as_v2') 'Shared deployment did not use the selected SKU.'
     $secretPath = @($sharedDeploy.Arguments | Where-Object { $_ -like '@*' })[0].Substring(1)
     Assert-RunnerTest (-not (Test-Path -LiteralPath $secretPath)) 'VM password parameter file was not cleaned up.'
+    $runnerTemplate = Get-Content (Join-Path $root 'infra\runner\main.bicep') -Raw
+    Assert-RunnerTest ($runnerTemplate.Contains("storageAccountType: 'StandardSSD_LRS'")) 'OS disk preflight no longer matches the template SKU.'
+    foreach ($case in @(
+        @{ Sku = 'Standard_LRS'; Pattern = 'Standard_LRS.*StandardSSD_LRS.*stop/deallocate.*runner-os-disk-migration' },
+        @{ Sku = 'Premium_LRS'; Pattern = 'Premium_LRS.*StandardSSD_LRS' },
+        @{ Sku = 'lookup-failed'; Pattern = 'Unable to inspect runner OS disk' },
+        @{ Sku = 'missing-sku'; Pattern = 'returned no SKU' }
+    )) {
+        $global:RunnerTestDiskSku = $case.Sku
+        $callCount = $global:RunnerTestCalls.Count
+        Assert-RunnerFailure { & $deploymentScript -ResourceGroupName shared } $case.Pattern
+        $calls = @($global:RunnerTestCalls | Select-Object -Skip $callCount)
+        Assert-RunnerTest (@($calls | Where-Object { ($_.Arguments -join ' ') -match '^deployment group' }).Count -eq 0) 'Invalid OS disk reached what-if or deployment.'
+        Assert-RunnerTest (@($calls | Where-Object { ($_.Arguments -join ' ') -match '^disk show --ids /subscriptions/test/resourceGroups/shared/providers/Microsoft.Compute/disks/runner-os' }).Count -eq 1) 'Preflight did not inspect the actual managed disk.'
+    }
+    $global:RunnerTestDiskSku = 'StandardSSD_LRS'
+    foreach ($mode in @('existing-vm', 'existing-vm', 'new-vm')) {
+        $global:RunnerTestMode = $mode
+        $callCount = $global:RunnerTestCalls.Count
+        & $deploymentScript -ResourceGroupName shared
+        $calls = @($global:RunnerTestCalls | Select-Object -Skip $callCount)
+        Assert-RunnerTest (@($calls | Where-Object { ($_.Arguments -join ' ') -match '^deployment group create' }).Count -eq 1) 'Aligned rerun or first deployment was blocked.'
+        if ($mode -eq 'new-vm') {
+            Assert-RunnerTest (@($calls | Where-Object { ($_.Arguments -join ' ') -match '^disk show' }).Count -eq 0) 'First deployment tried to inspect a nonexistent disk.'
+        }
+    }
     $env:RUNNER_ADMIN_PASSWORD = ''
     Assert-RunnerFailure { & $deploymentScript -ResourceGroupName shared } 'RUNNER_ADMIN_PASSWORD'
 
@@ -247,7 +293,7 @@ try {
     Assert-RunnerFailure {
         & $registrationScript -Repository other/repository -RunnerName unit-runner -RegistrationToken unit-token -RunnerDirectory $sandbox
     } 'different runner/repository'
-    Remove-Item -LiteralPath (Join-Path $sandbox '.service')
+    Remove-Item -LiteralPath (Join-Path $sandbox '.service') -Force
     Assert-RunnerFailure {
         & $registrationScript -Repository example/repository -RunnerName unit-runner -RegistrationToken unit-token -RunnerDirectory $sandbox
     } 'without a Windows service'
@@ -328,7 +374,7 @@ try {
     Remove-Item Function:\global:az
     Remove-Item Function:\global:New-ItemProperty, Function:\global:Get-Service -ErrorAction SilentlyContinue
     Remove-Item Function:\global:Resolve-DnsName -ErrorAction SilentlyContinue
-    Remove-Variable RunnerTestCalls, RunnerTestMode, RunnerTestRestrictions -Scope Global
+    Remove-Variable RunnerTestCalls, RunnerTestMode, RunnerTestRestrictions, RunnerTestDiskSku -Scope Global
     Remove-Variable RunnerTestServiceWrites -Scope Global -ErrorAction SilentlyContinue
     Remove-Variable RunnerTestDeployment -Scope Global -ErrorAction SilentlyContinue
 }

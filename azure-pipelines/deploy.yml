@@ -44,6 +44,16 @@ trigger:
 
 pr: none
 
+parameters:
+  - name: deploymentTarget
+    displayName: Promote infrastructure through environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - test
+      - prod
+
 pool:
   vmImage: ubuntu-latest
 
@@ -103,32 +113,34 @@ stages:
         - Package
         - Bootstrap
 
-  - template: templates/deploy-stage.yml
-    parameters:
-      stageName: Deploy_Test
-      displayName: Deploy - test
-      environmentName: test
-      serviceConnection: ${{ variables['serviceConnection.test'] }}
-      agentPool: ${{ variables.runnerPool }}
-      resourceGroupName: $(resourceGroup.test)
-      subscriptionId: $(subscriptionId.test)
-      artifactName: $(releaseArtifactName)
-      packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
-      dependsOn:
-        - Package
-        - Deploy_Dev
+  - ${{ if ne(parameters.deploymentTarget, 'dev') }}:
+      - template: templates/deploy-stage.yml
+        parameters:
+          stageName: Deploy_Test
+          displayName: Deploy - test
+          environmentName: test
+          serviceConnection: ${{ variables['serviceConnection.test'] }}
+          agentPool: ${{ variables.runnerPool }}
+          resourceGroupName: $(resourceGroup.test)
+          subscriptionId: $(subscriptionId.test)
+          artifactName: $(releaseArtifactName)
+          packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
+          dependsOn:
+            - Package
+            - Deploy_Dev
 
-  - template: templates/deploy-stage.yml
-    parameters:
-      stageName: Deploy_Prod
-      displayName: Deploy - prod
-      environmentName: prod
-      serviceConnection: ${{ variables['serviceConnection.prod'] }}
-      agentPool: ${{ variables.runnerPool }}
-      resourceGroupName: $(resourceGroup.prod)
-      subscriptionId: $(subscriptionId.prod)
-      artifactName: $(releaseArtifactName)
-      packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
-      dependsOn:
-        - Package
-        - Deploy_Test
+  - ${{ if eq(parameters.deploymentTarget, 'prod') }}:
+      - template: templates/deploy-stage.yml
+        parameters:
+          stageName: Deploy_Prod
+          displayName: Deploy - prod
+          environmentName: prod
+          serviceConnection: ${{ variables['serviceConnection.prod'] }}
+          agentPool: ${{ variables.runnerPool }}
+          resourceGroupName: $(resourceGroup.prod)
+          subscriptionId: $(subscriptionId.prod)
+          artifactName: $(releaseArtifactName)
+          packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
+          dependsOn:
+            - Package
+            - Deploy_Test

@@ -26,6 +26,16 @@ trigger:
 
 pr: none
 
+parameters:
+  - name: deploymentTarget
+    displayName: Promote artifacts through environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - test
+      - prod
+
 pool:
   vmImage: ubuntu-latest
 
@@ -78,32 +88,34 @@ stages:
       dependsOn:
         - Package
 
-  - template: templates/publish-artifacts-stage.yml
-    parameters:
-      stageName: Publish_Test
-      displayName: Publish artifacts - test
-      environmentName: test
-      serviceConnection: ${{ variables['serviceConnection.test'] }}
-      agentPool: ${{ variables.runnerPool }}
-      resourceGroupName: $(resourceGroup.test)
-      subscriptionId: $(subscriptionId.test)
-      artifactName: $(synapseArtifactName)
-      packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
-      dependsOn:
-        - Package
-        - Publish_Dev
+  - ${{ if ne(parameters.deploymentTarget, 'dev') }}:
+      - template: templates/publish-artifacts-stage.yml
+        parameters:
+          stageName: Publish_Test
+          displayName: Publish artifacts - test
+          environmentName: test
+          serviceConnection: ${{ variables['serviceConnection.test'] }}
+          agentPool: ${{ variables.runnerPool }}
+          resourceGroupName: $(resourceGroup.test)
+          subscriptionId: $(subscriptionId.test)
+          artifactName: $(synapseArtifactName)
+          packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
+          dependsOn:
+            - Package
+            - Publish_Dev
 
-  - template: templates/publish-artifacts-stage.yml
-    parameters:
-      stageName: Publish_Prod
-      displayName: Publish artifacts - prod
-      environmentName: prod
-      serviceConnection: ${{ variables['serviceConnection.prod'] }}
-      agentPool: ${{ variables.runnerPool }}
-      resourceGroupName: $(resourceGroup.prod)
-      subscriptionId: $(subscriptionId.prod)
-      artifactName: $(synapseArtifactName)
-      packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
-      dependsOn:
-        - Package
-        - Publish_Test
+  - ${{ if eq(parameters.deploymentTarget, 'prod') }}:
+      - template: templates/publish-artifacts-stage.yml
+        parameters:
+          stageName: Publish_Prod
+          displayName: Publish artifacts - prod
+          environmentName: prod
+          serviceConnection: ${{ variables['serviceConnection.prod'] }}
+          agentPool: ${{ variables.runnerPool }}
+          resourceGroupName: $(resourceGroup.prod)
+          subscriptionId: $(subscriptionId.prod)
+          artifactName: $(synapseArtifactName)
+          packageVersion: $[ stageDependencies.Package.Package.outputs['meta.releaseVersion'] ]
+          dependsOn:
+            - Package
+            - Publish_Test

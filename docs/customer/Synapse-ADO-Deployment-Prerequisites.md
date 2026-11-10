@@ -19,7 +19,7 @@ One set of values per environment. Resource groups must exist before deployment;
 - [ ] For each environment (dev, test, prod), have identified: Subscription ID; Resource group name; Azure region; Naming prefix.
 - [ ] Target resource group exists for every environment in scope (dev / test / prod).
 - [ ] Region supports Azure Synapse and meets data-residency requirements.
-- [ ] Resource providers registered: Microsoft.Synapse, Microsoft.Storage, Microsoft.KeyVault, Microsoft.OperationalInsights, Microsoft.Insights, Microsoft.ManagedIdentity, Microsoft.Compute, Microsoft.Network.
+- [ ] Resource providers registered: Microsoft.Synapse, Microsoft.Sql, Microsoft.Storage, Microsoft.KeyVault, Microsoft.OperationalInsights, Microsoft.Insights, Microsoft.ManagedIdentity, Microsoft.Compute, Microsoft.Network.
 
 ## 3. Microsoft Entra ID (deployment identity)
 
@@ -83,4 +83,3 @@ Complete after the first infrastructure deployment; the artifact publish pipelin
 - [ ] For each environment (dev, test, prod), have identified: Synapse workspace name (deployment output); Storage account name.
 - [ ] Workspace and storage names entered in variables.yml for each environment.
 - [ ] Publishing identity granted Synapse Artifact Publisher and Storage Blob Data Contributor (section 5).
-

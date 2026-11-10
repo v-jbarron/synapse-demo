@@ -43,7 +43,7 @@ variables:
 
   # Per-environment Azure resource placeholders.
   - name: resourceGroup.dev
-    value: 'rg-synapse-poc-dev2-wus3'
+    value: 'rg-synapse-poc-dev-wus3'
   - name: resourceGroup.test
     value: 'rg-synapse-poc-test-wus3'
   - name: resourceGroup.prod
@@ -64,6 +64,6 @@ variables:
 
   # Numeric Azure DevOps pipeline definition ID used by artifact rollback.
   - name: deployPipelineId
-    value: '0'
+    value: '3'
   - name: synapseArtifactPipelineId
-    value: '0'
+    value: '4'

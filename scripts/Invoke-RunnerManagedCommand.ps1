@@ -40,8 +40,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Unable to start managed Run Command '$Name'." }
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds + 300)
+    $inspectionUri = "$uri&`$expand=instanceView"
+    if ($IsWindows) {
+        # az.cmd passes query separators through cmd.exe.
+        $inspectionUri = "`"$inspectionUri`""
+    }
     do {
-        $json = az rest --method get --url "$uri&`$expand=instanceView" --output json
+        $json = az rest --method get --url $inspectionUri --output json
         if ($LASTEXITCODE -ne 0) { throw "Unable to inspect managed Run Command '$Name'." }
         $command = $json | ConvertFrom-Json
         $view = $command.properties.PSObject.Properties['instanceView']
